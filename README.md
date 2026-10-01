@@ -71,6 +71,8 @@ npm start -- .\examples\WORKFLOW.linear.md
 
 ## GitHub 自动开发并创建 PR
 
+支持同时管理多个 GitHub 仓库：使用 `tracker.provider.repositories` 列表，可为各仓库指定不同令牌和测试命令。见 [多仓库配置](docs/MULTI_REPOSITORY.md) 与 [完整示例](examples/WORKFLOW.github-multi.md)。原有 `provider.repo` 无需修改。
+
 已在 `walkskysu/space-tetris` 完成一次真实 Issue → 草稿 PR 测试，包含自动开发、测试、推送和 Issue 进度交接，见 [实测结果与专用配置](docs/SPACE_TETRIS_E2E.md)。
 
 完整流程已经支持：Issue → 独立任务分支 → Codex 开发 → 强制测试 → Git 提交/推送 → 草稿 PR → Issue 评论与审查标签。

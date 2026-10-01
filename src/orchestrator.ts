@@ -3,6 +3,7 @@ import { createTracker } from './tracker.js';
 import { loadWorkflow, type Workflow } from './workflow.js';
 import { runAgent, eligible, type Run } from './runner.js';
 import { WorkspaceManager } from './workspace.js';
+import { githubRepositoryConfigs } from './github-repositories.js';
 import { norm, errorText, log, type Issue, type Tracker, type AgentEvent, type Log } from './types.js';
 
 const tokens = () => ({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
@@ -190,22 +191,25 @@ export class Orchestrator {
   snapshot() {
     const now = this.now();
     const config = this.workflow?.config;
-    const automation = config?.tracker.provider.automation;
+    const repositories = config?.tracker.kind === 'github' ? githubRepositoryConfigs(config) : [];
     const issues = new Map(this.observed);
     for (const entry of this.running.values()) if (!issues.has(entry.issue.id)) issues.set(entry.issue.id, entry.issue);
     for (const entry of this.retries.values()) if (!issues.has(entry.issue.id)) issues.set(entry.issue.id, entry.issue);
     const board = [...issues.values()].map(issue => {
+      const repository = typeof issue.native_ref?.repository === 'string' ? issue.native_ref.repository : null;
+      const automation = repositories.find(c => c.tracker.provider.repo === repository)?.tracker.provider.automation ?? config?.tracker.provider.automation;
       const labels = issue.labels.map(norm);
       const status = labels.includes(norm(automation?.review_label ?? 'symphony:review')) ? 'review'
         : labels.includes(norm(automation?.blocked_label ?? 'symphony:blocked')) ? 'blocked'
         : this.running.has(issue.id) ? 'running' : this.retries.has(issue.id) ? 'retrying'
         : config && eligible(issue, this.workflow) ? 'ready' : 'backlog';
-      return { id: issue.id, identifier: issue.identifier, title: issue.title, description: issue.description,
+      return { id: issue.id, identifier: issue.identifier, repository, title: issue.title, description: issue.description,
         url: issue.url, state: issue.state, labels: issue.labels, priority: issue.priority, status,
         updated_at: issue.updated_at, dispatchable: issue.dispatchable };
     });
     return { generated_at: new Date().toISOString(), counts: { running: this.running.size, retrying: this.retries.size },
-      dashboard: { project: config?.tracker.provider.repo ?? config?.tracker.provider.project_slug ?? 'Local workspace',
+      dashboard: { project: repositories.length > 1 ? `${repositories.length} GitHub repositories` : repositories[0]?.tracker.provider.repo ?? config?.tracker.provider.project_slug ?? 'Local workspace',
+        repositories: repositories.map(c => c.tracker.provider.repo as string),
         tracker: config?.tracker.kind ?? 'unknown', max_concurrent_agents: config?.agent.max_concurrent_agents ?? 0,
         polling_interval_ms: config?.polling.interval_ms ?? 0, required_labels: config?.tracker.required_labels ?? [],
         tracker_updated_at: this.trackerUpdatedAt, tracker_error: this.trackerError, issues: board, activities: [...this.activities] },

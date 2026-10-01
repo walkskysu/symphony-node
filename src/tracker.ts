@@ -6,6 +6,7 @@ import { githubAutomationConfig, type GitHubAutomationConfig } from './github-co
 import { GitHubApi } from './github-api.js';
 import { GitHubRun } from './github-run.js';
 import type { RunContext, RunIntegration } from './types.js';
+import { githubRepositoryConfigs } from './github-repositories.js';
 
 const nullable = (v: unknown): string | null => typeof v === 'string' ? v : null;
 const timestamp = (v: unknown): string | null => typeof v === 'string' && /^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d\d:\d\d)$/i.test(v) && Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : null;
@@ -116,7 +117,7 @@ export class LinearTracker implements Tracker {
   }
 }
 export function createTracker(config: Config, logger: Log = log): Tracker {
-  if (config.tracker.kind === 'github') return new GitHubTracker(config, logger);
+  if (config.tracker.kind === 'github') return config.tracker.provider.repositories !== undefined ? new MultiGitHubTracker(config, logger) : new GitHubTracker(config, logger);
   if (config.tracker.kind === 'linear') return new LinearTracker(config, logger);
   const file = config.tracker.provider.path;
   if (typeof file !== 'string' || !file.trim()) throw new SymphonyError('invalid_tracker_config', 'file provider requires path');
@@ -131,6 +132,7 @@ export class GitHubTracker implements Tracker {
   private assignee?: string;
   private automation?: GitHubAutomationConfig;
   constructor(private config: Config, private logger: Log = log, private transport: typeof fetch = fetch) {
+    if (config.tracker.provider.repositories !== undefined) throw new SymphonyError('invalid_tracker_config', 'Use MultiGitHubTracker for repositories');
     const p = config.tracker.provider;
     if (typeof p.repo !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(p.repo) || p.repo.split('/').some((s: string) => s === '.' || s === '..')) throw new SymphonyError('invalid_tracker_config', 'github requires repo in owner/repository format');
     this.repository = p.repo.toLowerCase();
@@ -230,5 +232,36 @@ export class GitHubTracker implements Tracker {
       result.push(issue);
     }
     return result;
+  }
+}
+
+export class MultiGitHubTracker implements Tracker {
+  readonly secretEnvironmentNames: string[];
+  private readonly trackers: Map<string, GitHubTracker>;
+  constructor(config: Config, logger: Log = log, transport: typeof fetch = fetch) {
+    this.trackers = new Map(githubRepositoryConfigs(config).map(scoped => [scoped.tracker.provider.repo, new GitHubTracker(scoped, logger, transport)]));
+    const sharedSecret = config.tracker.provider.api_key;
+    const sharedNames = typeof sharedSecret === 'string' && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(sharedSecret) ? [sharedSecret.slice(1)] : [];
+    this.secretEnvironmentNames = [...new Set([...sharedNames, ...[...this.trackers.values()].flatMap(t => t.secretEnvironmentNames)])];
+    // An agent/test/hook for repository A must not inherit repository B's token.
+    for (const tracker of this.trackers.values()) tracker.secretEnvironmentNames = [...this.secretEnvironmentNames];
+  }
+  private async collect(requests: Promise<Issue[]>[]): Promise<Issue[]> {
+    const results = await Promise.allSettled(requests);
+    const failed = results.find(result => result.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
+    return results.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+  }
+  fetchByStates(states: string[]): Promise<Issue[]> {
+    return this.collect([...this.trackers.values()].map(tracker => tracker.fetchByStates(states)));
+  }
+  fetchByIds(ids: string[]): Promise<Issue[]> {
+    return this.collect([...this.trackers].map(([repo, tracker]) => tracker.fetchByIds(ids.filter(id => id.startsWith(`${repo}#`)))));
+  }
+  createRunIntegration(context: RunContext): RunIntegration | undefined {
+    const repo = context.issue.native_ref?.repository;
+    const tracker = typeof repo === 'string' ? this.trackers.get(repo) : undefined;
+    if (!tracker || !context.issue.id.startsWith(`${repo}#`)) throw new SymphonyError('invalid_issue_context', 'Issue is outside configured repositories');
+    return tracker.createRunIntegration(context);
   }
 }

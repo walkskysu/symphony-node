@@ -25,7 +25,7 @@ function task(issue) {
 function empty(message) { const el = node('div', 'empty'); el.append(node('span', 'empty-symbol', '◇'), node('span', '', message)); return el; }
 function renderBoard() {
   const query = $('search').value.trim().toLowerCase();
-  const all = snapshot.dashboard?.issues || [];
+  const all = (snapshot.dashboard?.issues || []).filter(i => !$('repository').value || i.repository === $('repository').value);
   const issues = all.filter(i => (filter === 'all' || filter === 'attention' && ['retrying', 'blocked'].includes(i.status) || i.status === filter) && `${i.title} ${i.identifier} ${i.labels.join(' ')}`.toLowerCase().includes(query));
   const focused = document.activeElement?.dataset?.issue;
   $('board').replaceChildren(); $('list').replaceChildren();
@@ -38,7 +38,7 @@ function renderBoard() {
   for (const issue of issues) { const row = node('button', 'list-row'); row.dataset.issue = issue.id; row.append(node('span', '', issue.identifier), node('strong', '', issue.title), badge(issue.status), node('span', '', issue.state)); row.addEventListener('click', () => openDetail(issue.id)); $('list').append(row); }
   if (!issues.length) $('list').append(empty(query ? '没有找到匹配的任务，试试其他关键词。' : '当前没有任务。请在任务源中创建 Issue 并添加调度标签。'));
   $('board').hidden = view !== 'board'; $('list').hidden = view !== 'list';
-  $('total-count').textContent = all.length; $('nav-count').textContent = all.length;
+  $('total-count').textContent = all.length; $('nav-count').textContent = snapshot.dashboard.issues.length;
   $('match-count').textContent = `显示 ${issues.length} / ${all.length} 个任务`;
   if (focused) Array.from(document.querySelectorAll('[data-issue]')).find(el => el.dataset.issue === focused && !el.closest('[hidden]'))?.focus({ preventScroll: true });
 }
@@ -49,6 +49,7 @@ function detailContent() {
   $('detail-status').replaceChildren(badge(issue.status)); $('detail-description').textContent = issue.description || '暂无任务描述。';
   const fields = $('detail-fields'); fields.replaceChildren(); const run = runtime(issue), waiting = retry(issue);
   field(fields, '任务源状态', issue.state); field(fields, '标签', issue.labels.join(' · ') || '无');
+  if (issue.repository) field(fields, '所属仓库', issue.repository);
   if (run) { field(fields, '运行时长', duration((Date.now() - Date.parse(run.started_at)) / 1000)); field(fields, '当前轮次', run.turn_count); field(fields, '最近事件', eventNames[run.last_event] || run.last_event || '正在启动'); field(fields, 'Token', number(run.tokens.total_tokens)); field(fields, '会话', run.session_id || '等待会话启动'); }
   if (waiting) { field(fields, '重试次数', waiting.attempt); field(fields, '下次尝试', time(waiting.due_at)); field(fields, '失败原因', waiting.error || '等待继续'); }
   const url = safeURL(issue.url); $('issue-link').hidden = !url; if (url) $('issue-link').href = url; else $('issue-link').removeAttribute('href');
@@ -61,6 +62,13 @@ function renderActivity() {
 }
 function render() {
   const d = snapshot.dashboard || { issues: [], activities: [] };
+  const repos = d.repositories || [], selection = $('repository').value;
+  if (JSON.stringify(repos) !== $('repository').dataset.options) {
+    $('repository').replaceChildren(new Option('全部仓库', ''), ...repos.map(repo => new Option(repo, repo)));
+    $('repository').value = repos.includes(selection) ? selection : '';
+    $('repository').dataset.options = JSON.stringify(repos);
+  }
+  $('repository-filter').hidden = repos.length < 2;
   $('sidebar-project').textContent = d.project; $('project-label').textContent = `${d.project} · ${String(d.tracker).toUpperCase()}`;
   $('running').textContent = snapshot.counts.running; $('capacity').textContent = `/ ${d.max_concurrent_agents}`;
   $('retrying').textContent = snapshot.counts.retrying; $('review').textContent = d.issues.filter(i => i.status === 'review').length;
@@ -72,6 +80,7 @@ function render() {
   renderBoard(); renderActivity();
   const service = $('service-details'); service.replaceChildren();
   field(service, '任务源', `${d.tracker} · ${d.project}`); field(service, '调度状态', snapshot.health.dispatch_enabled ? '已启用' : '已暂停');
+  if (repos.length) field(service, '仓库列表', repos.join(' · '));
   field(service, '并发上限', d.max_concurrent_agents); field(service, '任务轮询间隔', `${d.polling_interval_ms / 1000} 秒`); field(service, '调度标签', d.required_labels?.join(' · ') || '未限定'); field(service, '最近同步', d.tracker_updated_at ? new Date(d.tracker_updated_at).toLocaleString('zh-CN') : '尚未同步');
   const rate = snapshot.rate_limits; if (rate?.primary) field(service, '当前额度已使用', `${rate.primary.usedPercent}%`);
   if ($('detail').open) detailContent();
@@ -89,6 +98,7 @@ $('refresh').addEventListener('click', async () => {
   finally { $('refresh').disabled = false; }
 });
 $('search').addEventListener('input', () => { if (snapshot) renderBoard(); });
+$('repository').addEventListener('change', () => { if (snapshot) renderBoard(); });
 document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => { filter = button.dataset.filter; document.querySelectorAll('[data-filter]').forEach(el => { el.classList.toggle('selected', el === button); el.setAttribute('aria-pressed', String(el === button)); }); if (snapshot) renderBoard(); }));
 for (const name of ['board', 'list']) $(name + '-view').addEventListener('click', () => { view = name; for (const v of ['board', 'list']) { $(v + '-view').classList.toggle('selected', v === view); $(v + '-view').setAttribute('aria-pressed', String(v === view)); } if (snapshot) renderBoard(); });
 document.querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => { page = button.dataset.page; for (const name of ['board', 'activity', 'service']) $(name + '-page').hidden = name !== page; document.querySelectorAll('[data-page]').forEach(el => { el.classList.toggle('active', el === button); if (el === button) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current'); }); $('crumb').textContent = { board: '任务看板', activity: '运行活动', service: '服务概览' }[page]; }));
