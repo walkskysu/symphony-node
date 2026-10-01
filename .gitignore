@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.protocol-schema/
+.symphony/
+.env
+*.log

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Symphony · 工作控制台</title><link rel="stylesheet" href="/dashboard.css"><script type="module" src="/dashboard.js"></script></head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="/" aria-label="Symphony 首页"><span class="mark">≋</span> symphony<span class="beta">LOCAL</span></a>
+  <div class="workspace"><span class="workspace-icon">S</span><div><strong>开发工作空间</strong><small id="sidebar-project">正在连接…</small></div></div>
+  <div class="nav-label">工作空间</div>
+  <nav aria-label="主导航"><button class="nav-item active" data-page="board"><span>▦</span>任务看板<span id="nav-count" class="nav-count">0</span></button><button class="nav-item" data-page="activity"><span>◷</span>运行活动</button><button class="nav-item" data-page="service"><span>⚙</span>服务概览</button></nav>
+  <div class="sidebar-note"><span class="orbit">✳</span><strong>从想法，到 Pull Request。</strong><p>让 Agent 专注开发，<br>让你专注下一步。</p></div>
+  <div class="sidebar-bottom"><span class="local-dot"></span><span>Windows · 本地运行</span><small>v0.1</small></div>
+</aside>
+<main>
+  <header class="topbar"><div class="breadcrumb">工作空间 <span>/</span> <strong id="crumb">任务看板</strong></div><div class="connection"><span id="connection-dot" class="dot"></span><span id="connection">连接中</span><span class="avatar">S</span></div></header>
+  <div class="content">
+    <section class="heading"><div><div class="eyebrow">YOUR AGENTS, IN SYNC</div><h1 id="page-title">让开发，有序进行<span class="title-dot">.</span></h1><p id="page-subtitle">从 Issue 到 PR，每一步进展尽在这里。</p></div><button id="refresh" class="primary"><span>↻</span> 刷新调度</button></section>
+    <div id="notice" role="status" class="notice" hidden></div>
+    <section class="metrics" aria-label="运行指标"><article><span>运行中的 Agent</span><div><strong id="running">—</strong><small id="capacity">/ —</small><span class="metric-icon green">↗</span></div><p>正在推进你的任务</p></article><article><span>等待重试</span><div><strong id="retrying">—</strong><span class="metric-icon amber">↻</span></div><p>失败后自动恢复</p></article><article><span>等待人工审查</span><div><strong id="review">—</strong><span class="metric-icon violet">◇</span></div><p>交接后，等待你的决定</p></article><article><span>累计 Token</span><div><strong id="tokens">—</strong><span class="metric-icon blue">⌁</span></div><p id="runtime">本次服务会话</p></article></section>
+    <section id="board-page">
+      <div class="section-heading"><div><h2>任务空间 <span id="total-count" class="count">0</span></h2><p id="project-label">正在获取任务源</p></div><div class="view-switch" aria-label="视图切换"><button id="board-view" class="selected" aria-pressed="true" title="看板视图">▦ 看板</button><button id="list-view" aria-pressed="false" title="列表视图">☷ 列表</button></div></div>
+      <div class="toolbar"><div class="tabs" role="group" aria-label="任务筛选"><button class="selected" data-filter="all">全部任务</button><button data-filter="running">进行中</button><button data-filter="review">待审查</button><button data-filter="attention">需关注</button></div><label class="search"><span>⌕</span><input id="search" type="search" aria-label="搜索任务" placeholder="搜索任务标题、编号…"><kbd>/</kbd></label></div>
+      <div id="board" class="board" aria-label="任务看板"><p class="loading">正在连接工作空间…</p></div>
+      <div id="list" class="list" hidden></div>
+      <footer class="board-footer"><span><i class="dot"></i> 每 5 秒更新页面 · <span id="updated">尚未同步</span></span><span id="match-count">任务状态来自当前调度快照</span></footer>
+    </section>
+    <section id="activity-page" hidden><div class="section-heading"><div><h2>运行活动</h2><p>本次服务会话最近 100 条任务事件</p></div></div><div id="activities" class="activity-list"></div></section>
+    <section id="service-page" hidden><div class="section-heading"><div><h2>服务概览</h2><p>当前工作流与实时连接状态</p></div></div><dl id="service-details" class="service-details"></dl><div class="info-note">在本地 WORKFLOW.md 中修改工作流；服务会自动重新加载。令牌仅在后台读取，不会传到页面。</div></section>
+    <div class="bottom-note"><span class="small-mark">≋</span> Symphony 把任务交给 Agent，把掌控感留给你。<span>LOCAL WORKSPACE</span></div>
+  </div>
+</main>
+<dialog id="detail" aria-labelledby="detail-title"><div class="dialog-top"><span id="detail-id"></span><button id="close-detail" aria-label="关闭详情">×</button></div><div class="dialog-content"><span id="detail-status" class="badge"></span><h2 id="detail-title"></h2><p id="detail-description" class="description"></p><dl id="detail-fields"></dl><a id="issue-link" class="primary link-button" target="_blank" rel="noopener noreferrer">在任务源中打开 ↗</a></div></dialog>
+</body></html>

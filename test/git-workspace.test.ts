@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { GitWorkspace } from '../src/git-workspace.js';
+import { githubAutomationConfig } from '../src/github-config.js';
+import { resolveConfig } from '../src/workflow.js';
+import { temp, issue, quiet } from './helpers.js';
+
+test('real local Git: isolated branch, mandatory checks, push, retry reuse and no secret file commits', { timeout: 30000 }, async () => {
+  const root = await temp(), remote = path.join(root, 'remote.git'), seed = path.join(root, 'seed'), workspace = path.join(root, 'work', 'issue');
+  await mkdir(seed); await mkdir(workspace, { recursive: true });
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@localhost', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(root, 'init', '--bare', remote); git(seed, 'init', '-b', 'main');
+  await writeFile(path.join(seed, 'check.cjs'), "if(require('node:fs').readFileSync('value.txt','utf8') !== 'fixed') process.exit(1)");
+  await writeFile(path.join(seed, 'value.txt'), 'broken'); git(seed, 'add', '.'); git(seed, 'commit', '-m', 'initial'); git(seed, 'push', remote, 'HEAD:refs/heads/main');
+  const config = resolveConfig({ workspace: { root: path.join(root, 'work') }, tracker: { kind: 'github', required_labels: ['symphony'], provider: { repo: 'owner/repo', api_key: 'fake', automation: { enabled: true, test_command: 'node check.cjs' } } } }, path.join(root, 'WORKFLOW.md'));
+  const context = { issue: issue({ id: 'owner/repo#7' }), workspace, signal: new AbortController().signal, log: quiet };
+  const create = () => new GitWorkspace(context, config, githubAutomationConfig(config)!, 'owner/repo', 7, remote, 'fake', ['GITHUB_TOKEN']);
+  let manager = create(); await manager.prepare('main');
+  await assert.rejects(manager.publish('Fix'), { category: 'checks_failed' });
+  assert.equal(git(root, '--git-dir', remote, 'branch', '--list', 'symphony/*'), '');
+  await writeFile(path.join(workspace, 'value.txt'), 'fixed');
+  const published = await manager.publish('Fix'); assert.equal(published.branch, 'symphony/issue-7');
+  assert.equal(git(root, '--git-dir', remote, 'show', 'symphony/issue-7:value.txt'), 'fixed');
+  assert.equal(git(root, '--git-dir', remote, 'show', 'main:value.txt'), 'broken');
+  manager = create(); await manager.prepare('main'); const retried = await manager.publish('Fix again'); assert.equal(retried.sha, published.sha);
+  assert.ok(!(await readFile(path.join(workspace, '.git', 'config'), 'utf8')).includes('Authorization'));
+  await writeFile(path.join(workspace, '.env'), 'GITHUB_TOKEN=do-not-commit'); await assert.rejects(manager.publish('Unsafe'), { category: 'sensitive_file_in_commit' });
+});

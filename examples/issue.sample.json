@@ -1,0 +1,12 @@
+[
+  {
+    "id": "local-1",
+    "identifier": "LOCAL-1",
+    "title": "Create a hello-world module",
+    "description": "Create hello.js exporting a hello function that returns Hello, Symphony! Add a node:test test and run it.",
+    "state": "Todo",
+    "priority": 2,
+    "labels": ["symphony"],
+    "dispatchable": true
+  }
+]
