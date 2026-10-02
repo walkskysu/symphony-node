@@ -4,7 +4,7 @@ import { loadWorkflow, type Workflow } from './workflow.js';
 import { runAgent, eligible, type Run } from './runner.js';
 import { WorkspaceManager } from './workspace.js';
 import { githubRepositoryConfigs } from './github-repositories.js';
-import { norm, errorText, log, type Issue, type Tracker, type AgentEvent, type Log } from './types.js';
+import { SymphonyError, norm, errorText, log, type Issue, type Tracker, type AgentEvent, type Log } from './types.js';
 
 const tokens = () => ({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
 interface Running {
@@ -83,6 +83,20 @@ export class Orchestrator {
     }
   }
   tick(): Promise<void> { return this.enqueue(async () => { if (!this.stopping) { await this.reload(); await this.cycle(); } }); }
+  restartIssue(id: string): Promise<void> {
+    return this.enqueue(async () => {
+      await this.reload();
+      if (this.stopping || !this.valid) throw new SymphonyError('service_unavailable');
+      if (this.running.has(id)) throw new SymphonyError('issue_running');
+      if (!this.tracker.restartIssue) throw new SymphonyError('restart_unsupported');
+      const issue = await this.tracker.restartIssue(id);
+      this.retries.delete(id); this.claimed.delete(id); this.completed.delete(id);
+      this.observed.set(id, issue); this.nextPoll = 0;
+      this.activities.unshift({ timestamp: new Date().toISOString(), event: 'issue_restart_requested', issue_identifier: issue.identifier });
+      this.activities.length = Math.min(this.activities.length, 100);
+      this.logger('issue_restart_requested', { issue_id: id, issue_identifier: issue.identifier });
+    }).then(() => { void this.tick().catch(() => {}); });
+  }
   private async cycle(): Promise<void> {
     if (this.stopping) return;
     await this.reconcile();
@@ -205,7 +219,8 @@ export class Orchestrator {
         : config && eligible(issue, this.workflow) ? 'ready' : 'backlog';
       return { id: issue.id, identifier: issue.identifier, repository, title: issue.title, description: issue.description,
         url: issue.url, state: issue.state, labels: issue.labels, priority: issue.priority, status,
-        updated_at: issue.updated_at, dispatchable: issue.dispatchable };
+        updated_at: issue.updated_at, dispatchable: issue.dispatchable,
+        can_restart: config?.tracker.kind === 'github' && automation?.enabled === true && issue.state === 'open' && !this.running.has(issue.id) && status !== 'review' };
     });
     return { generated_at: new Date().toISOString(), counts: { running: this.running.size, retrying: this.retries.size },
       dashboard: { project: repositories.length > 1 ? `${repositories.length} GitHub repositories` : repositories[0]?.tracker.provider.repo ?? config?.tracker.provider.project_slug ?? 'Local workspace',

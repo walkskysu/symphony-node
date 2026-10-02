@@ -156,6 +156,28 @@ export class GitHubTracker implements Tracker {
     if (!this.automation) return;
     return new GitHubRun(this.config, this.automation, context, new GitHubApi(this.config.tracker.provider.endpoint ?? 'https://api.github.com', this.repository, this.token, this.transport), this.token, this.secretEnvironmentNames);
   }
+  async restartIssue(id: string): Promise<Issue> {
+    if (!this.automation) throw new SymphonyError('restart_unsupported');
+    const issue = (await this.fetchByIds([id]))[0];
+    if (!issue) throw new SymphonyError('issue_not_found');
+    if (issue.state !== 'open') throw new SymphonyError('issue_closed');
+    if (issue.labels.includes(norm(this.automation.reviewLabel))) throw new SymphonyError('issue_in_review');
+    const api = new GitHubApi(this.config.tracker.provider.endpoint ?? 'https://api.github.com', this.repository, this.token, this.transport);
+    const signal = AbortSignal.timeout(60000), number = issue.native_ref!.issue_number;
+    const raw = await api.request('GET', `/issues/${number}`, undefined, signal);
+    if (raw.state !== 'open' || raw.pull_request) throw new SymphonyError('issue_closed');
+    if (this.assignee && !(raw.assignees ?? []).some((a: any) => norm(a.login ?? '') === this.assignee)) throw new SymphonyError('assignee_mismatch');
+    const prs = await api.list(`/pulls?state=all&head=${encodeURIComponent(this.repository.split('/')[0] + ':symphony/issue-' + number)}`, signal);
+    if (prs.length) throw new SymphonyError('issue_has_pull_request');
+    // Add only required labels; never replace unrelated labels. Remove the blocker last.
+    await api.request('POST', `/issues/${number}/labels`, { labels: this.config.tracker.required_labels }, signal);
+    if (issue.labels.includes(norm(this.automation.blockedLabel))) {
+      await api.request('DELETE', `/issues/${number}/labels/${encodeURIComponent(this.automation.blockedLabel)}`, undefined, signal);
+    }
+    const fresh = (await this.fetchByIds([id]))[0];
+    if (!fresh) throw new SymphonyError('issue_not_found');
+    return fresh;
+  }
   private async request(url: URL, allowMissing = false): Promise<{ response: Response; body: unknown } | null> {
     let response: Response;
     try {
@@ -257,6 +279,11 @@ export class MultiGitHubTracker implements Tracker {
   }
   fetchByIds(ids: string[]): Promise<Issue[]> {
     return this.collect([...this.trackers].map(([repo, tracker]) => tracker.fetchByIds(ids.filter(id => id.startsWith(`${repo}#`)))));
+  }
+  async restartIssue(id: string): Promise<Issue> {
+    const tracker = this.trackers.get(id.split('#')[0]);
+    if (!tracker) throw new SymphonyError('issue_not_found');
+    return tracker.restartIssue(id);
   }
   createRunIntegration(context: RunContext): RunIntegration | undefined {
     const repo = context.issue.native_ref?.repository;

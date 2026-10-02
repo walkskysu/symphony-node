@@ -2,6 +2,26 @@ const $ = id => document.getElementById(id);
 const statuses = { backlog: '待安排', ready: '待调度', running: '进行中', retrying: '等待重试', review: '待审查', blocked: '需处理' };
 const eventNames = { worker_started: 'Agent 开始处理任务', repository_prepared: '工作分支已准备', checks_started: '开始执行验证', branch_pushed: '分支已推送', pull_request_handoff: 'Pull Request 已交接', worker_completed: '本轮任务完成', worker_failed: '任务失败，等待重试', issue_blocked: '任务需要人工处理', post_handoff_agent_error: '交接已完成，模型会话随后报错' };
 let snapshot, filter = 'all', view = 'board', page = 'board', selectedId, loading = false, lastFocus;
+let restarting = false;
+const restartButton = document.createElement('button');
+restartButton.id = 'restart-issue'; restartButton.className = 'primary'; restartButton.textContent = '保留进度并重试';
+$('detail-description').before(restartButton);
+const restartMessage = document.createElement('p'); restartMessage.setAttribute('role', 'status');
+restartMessage.id = 'restart-message';
+restartMessage.textContent = '重试会保留已有代码和提交，并解除阻塞、恢复调度。'; restartButton.before(restartMessage);
+eventNames.issue_restart_requested = '用户请求重新处理';
+restartButton.addEventListener('click', async () => {
+  if (restarting || !selectedId) return;
+  const id = selectedId; restarting = true; restartButton.disabled = true; restartButton.textContent = '正在重新调度…';
+  const messages = { issue_running: '该任务已在执行，请勿重复启动。', issue_closed: '该 Issue 已关闭，请先在 GitHub 重新打开。', issue_in_review: '该任务正在等待 PR 审查。', issue_has_pull_request: '该任务已有 PR，当前版本不支持在已有 PR 上重新开发。', assignee_mismatch: 'Issue 负责人不符合此仓库的配置。', restart_unsupported: '此仓库未启用 GitHub 自动发布。', issue_not_found: 'Issue 不存在或已不在配置的仓库中。', tracker_status: 'GitHub 拒绝请求，请检查令牌和仓库权限。' };
+  try {
+    const response = await fetch(`/api/v1/issues/${encodeURIComponent(id)}/restart`, { method: 'POST', signal: AbortSignal.timeout(120000) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(messages[result.error?.code] || '重新调度失败，请检查服务日志和 GitHub 连接后重试。');
+    await load(); restartMessage.textContent = `${id} 已提交重新调度，将保留已有工作区和提交；空闲名额可用时开始执行。`; notify(restartMessage.textContent);
+  } catch (error) { restartMessage.textContent = error.name === 'TimeoutError' ? '请求超时，结果尚未确认。请刷新状态后再操作。' : error.message; notify(restartMessage.textContent, true); }
+  finally { restarting = false; restartButton.textContent = '保留进度并重试'; if (snapshot) detailContent(); }
+});
 const number = value => new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value || 0);
 const time = value => value ? new Date(value).toLocaleTimeString('zh-CN', { hour12: false }) : '—';
 function node(tag, className, text) { const el = document.createElement(tag); if (className) el.className = className; if (text !== undefined) el.textContent = String(text); return el; }
@@ -44,8 +64,10 @@ function renderBoard() {
 }
 function field(container, title, value) { const row = node('div'); row.append(node('dt', '', title), node('dd', '', value ?? '—')); container.append(row); }
 function detailContent() {
+  restartButton.hidden = true;
   const issue = snapshot.dashboard.issues.find(i => i.id === selectedId); if (!issue) { $('detail-description').textContent = '该任务已离开当前调度快照。请到任务源查看最新状态。'; return; }
   $('detail-id').textContent = issue.identifier; $('detail-title').textContent = issue.title;
+  restartButton.hidden = !issue.can_restart; restartButton.disabled = restarting;
   $('detail-status').replaceChildren(badge(issue.status)); $('detail-description').textContent = issue.description || '暂无任务描述。';
   const fields = $('detail-fields'); fields.replaceChildren(); const run = runtime(issue), waiting = retry(issue);
   field(fields, '任务源状态', issue.state); field(fields, '标签', issue.labels.join(' · ') || '无');
@@ -54,7 +76,7 @@ function detailContent() {
   if (waiting) { field(fields, '重试次数', waiting.attempt); field(fields, '下次尝试', time(waiting.due_at)); field(fields, '失败原因', waiting.error || '等待继续'); }
   const url = safeURL(issue.url); $('issue-link').hidden = !url; if (url) $('issue-link').href = url; else $('issue-link').removeAttribute('href');
 }
-function openDetail(id) { selectedId = id; lastFocus = document.activeElement; detailContent(); if (!$('detail').open) $('detail').showModal(); }
+function openDetail(id) { selectedId = id; restartMessage.textContent = '重试会保留已有代码和提交，并解除阻塞、恢复调度。运行中和待审查任务不支持重试。'; lastFocus = document.activeElement; detailContent(); if (!$('detail').open) $('detail').showModal(); }
 function renderActivity() {
   const target = $('activities'); target.replaceChildren(); const rows = snapshot.dashboard?.activities || [];
   if (!rows.length) { target.append(empty('暂无运行事件。任务开始处理后，进展会显示在这里。')); return; }

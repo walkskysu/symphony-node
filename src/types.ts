@@ -10,6 +10,7 @@ export interface Tracker {
   fetchByStates(states: string[]): Promise<Issue[]>;
   fetchByIds(ids: string[]): Promise<Issue[]>;
   secretEnvironmentNames: string[];
+  restartIssue?(id: string): Promise<Issue>;
   createRunIntegration?(context: RunContext): RunIntegration | undefined;
 }
 export interface RunContext { issue: Issue; workspace: string; signal: AbortSignal; log: Log }

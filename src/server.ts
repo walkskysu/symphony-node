@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import type { Orchestrator } from './orchestrator.js';
+import { SymphonyError } from './types.js';
 
 export async function startServer(orchestrator: Orchestrator, port: number) {
   const assets = new Map(await Promise.all([
@@ -18,6 +19,17 @@ export async function startServer(orchestrator: Orchestrator, port: number) {
       res.writeHead(200, { 'Content-Type': `${asset.type}; charset=utf-8`, 'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" });
       res.end(asset.body); return;
+    }
+    if (route.startsWith('/api/v1/issues/') && route.endsWith('/restart')) {
+      if (req.method !== 'POST') { error(405, 'method_not_allowed'); return; }
+      const allowedHosts = new Set([`127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`, `localhost:${(server.address() as import('node:net').AddressInfo).port}`]);
+      if (!allowedHosts.has(req.headers.host ?? '') || (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) || req.headers['sec-fetch-site'] === 'cross-site') { error(403, 'origin_not_allowed'); return; }
+      const id = route.slice('/api/v1/issues/'.length, -'/restart'.length);
+      if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[1-9]\d*$/.test(id)) { error(400, 'invalid_issue_id'); return; }
+      void orchestrator.restartIssue(id).then(() => send(202, { queued: true, issue_id: id }), e => {
+        const code = e instanceof SymphonyError ? e.category : 'restart_failed';
+        error(code === 'issue_not_found' ? 404 : ['issue_running', 'issue_closed', 'issue_in_review', 'issue_has_pull_request', 'assignee_mismatch', 'restart_unsupported'].includes(code) ? 409 : 503, code);
+      }); return;
     }
     if (route === '/api/v1/refresh') {
       if (req.method !== 'POST') { error(405, 'method_not_allowed'); return; }

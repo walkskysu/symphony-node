@@ -9,6 +9,7 @@ tracker:
       draft: true
     repositories:
       - walkskysu/space-tetris
+      - walkskysu/AIAppNest
       - repo: walkskysu/symphony-node
         automation:
           test_command: npm.cmd test
@@ -27,8 +28,8 @@ agent:
   max_concurrent_agents: 2
   max_turns: 10
 codex:
-  # Requires a CLI version compatible with your configured model.
-  # Override command if using an isolated/local CLI installation.
+  # Use the locally installed CLI compatible with the configured model.
+  command: '& ''C:/aisrc/Symphony/.symphony/codex-runtime/node_modules/.bin/codex.cmd'' app-server'
   approval_policy: never
   read_timeout_ms: 30000
   thread_sandbox: workspace-write
